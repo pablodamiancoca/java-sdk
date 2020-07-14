@@ -40,6 +40,11 @@ public class ServicesContainer implements IDisposable {
             return configurations.get(configName).getRecurringConnector();
         throw new ApiException("The specified configuration has not been configured for recurring processing.");
     }
+    public IReportingService getReporting(String configName) throws ApiException {
+        if (configurations.containsKey(configName))
+            return configurations.get(configName).getReportingService();
+        throw new ApiException("The specified configuration has not been configured for reporting.");
+    }
     public ISecure3dProvider getSecure3d(String configName, Secure3dVersion version) throws ApiException {
         if(configurations.containsKey(configName)) {
             ISecure3dProvider provider = configurations.get(configName).getSecure3dProvider(version);
@@ -84,7 +89,7 @@ public class ServicesContainer implements IDisposable {
 
         // configure devices
         if(config.getDeviceConnectionConfig() != null) {
-
+            // TODO
         }
     }
 
@@ -115,8 +120,7 @@ public class ServicesContainer implements IDisposable {
     }
 
     private void addConfiguration(String configName, ConfiguredServices cs) {
-        if(configurations.containsKey(configName))
-            configurations.remove(configName);
+        configurations.remove(configName);
         configurations.put(configName, cs);
     }
 

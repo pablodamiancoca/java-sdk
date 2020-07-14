@@ -17,6 +17,8 @@ import com.global.api.paymentMethods.EBTCardData;
 import com.global.api.paymentMethods.GiftCard;
 import com.global.api.paymentMethods.IPaymentMethod;
 import com.global.api.paymentMethods.TransactionReference;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -73,6 +75,7 @@ public class AuthorizationBuilder extends TransactionBuilder<Transaction> {
     private BigDecimal shippingAmount;
     private StoredCredential storedCredential;
     private HashMap<String, ArrayList<String[]>> supplementaryData;
+    @Getter @Setter private BigDecimal surchargeAmount;
     private String tagData;
     private String timestamp;
 
@@ -396,7 +399,7 @@ public class AuthorizationBuilder extends TransactionBuilder<Transaction> {
         this.gratuity = value;
         return this;
     }
-    public AuthorizationBuilder withHostedPaymentData(HostedPaymentData value) throws ApiException {
+    public AuthorizationBuilder withHostedPaymentData(HostedPaymentData value)  {
         this.hostedPaymentData = value;
         return this;
     }
