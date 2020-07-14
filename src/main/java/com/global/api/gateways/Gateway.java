@@ -12,6 +12,7 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.zip.GZIPInputStream;
 
 abstract class Gateway {
     private String contentType;
@@ -20,9 +21,15 @@ abstract class Gateway {
     protected int timeout;
     protected String serviceUrl;
 
+    public String getContentType() {
+        return contentType;
+    }
     public void setEnableLogging(boolean enableLogging) {
 		this.enableLogging = enableLogging;
 	}
+    public boolean getEnableLogging() {
+        return enableLogging;
+    }
 	public HashMap<String, String> getHeaders() {
         return headers;
     }
@@ -64,8 +71,8 @@ abstract class Gateway {
             conn.setRequestMethod(verb);
             conn.addRequestProperty("Content-Type", String.format("%s; charset=UTF-8", contentType));
 
-            for(String key: headers.keySet()) {
-                conn.addRequestProperty(key, headers.get(key));
+            for (Map.Entry<String, String> header: headers.entrySet()) {
+                conn.addRequestProperty(header.getKey(), header.getValue());
             }
 
             if(!verb.equals("GET")) {
@@ -74,21 +81,38 @@ abstract class Gateway {
                 conn.setDoOutput(true);
                 conn.addRequestProperty("Content-Length", String.valueOf(request.length));
 
-				if (this.enableLogging)
-					System.out.println("Request: " + StringUtils.mask(data));
+                if (this.enableLogging)
+                    System.out.println("Request: " + StringUtils.mask(data));
                 DataOutputStream requestStream = new DataOutputStream(conn.getOutputStream());
                 requestStream.write(request);
                 requestStream.flush();
                 requestStream.close();
             }
             else if (this.enableLogging) {
-                    System.out.println("Request: " + endpoint);
+                System.out.println("Request: " + endpoint);
             }
 
             InputStream responseStream = conn.getInputStream();
-            String rawResponse = IOUtils.readFully(responseStream);
+
+            String rawResponse;
+            if (headers.containsKey("Accept-Encoding") && headers.get("Accept-Encoding").equalsIgnoreCase("gzip")) {
+                // Decompress GZIP response if specified
+                GZIPInputStream gzis = new GZIPInputStream(responseStream);
+                InputStreamReader reader = new InputStreamReader(gzis);
+                BufferedReader in = new BufferedReader(reader);
+
+                StringBuilder decompressedResponse = new StringBuilder();
+                String line;
+                while ((line = in.readLine()) != null) {
+                    decompressedResponse.append(line);
+                }
+                rawResponse = decompressedResponse.toString();
+            } else {
+                rawResponse = IOUtils.readFully(responseStream);
+            }
+
             responseStream.close();
-			if (this.enableLogging) {
+            if (this.enableLogging) {
                 System.out.println("Response: " + rawResponse);
             }
 

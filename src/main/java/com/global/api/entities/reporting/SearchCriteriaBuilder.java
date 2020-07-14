@@ -3,8 +3,11 @@ package com.global.api.entities.reporting;
 import com.global.api.builders.TransactionReportBuilder;
 import com.global.api.entities.enums.CardType;
 import com.global.api.entities.enums.PaymentMethodType;
+import com.global.api.entities.enums.TransactionStatus;
 import com.global.api.entities.enums.TransactionType;
 import com.global.api.entities.exceptions.ApiException;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
@@ -13,13 +16,17 @@ import java.util.Date;
 
 public class SearchCriteriaBuilder<TResult> {
 	private TransactionReportBuilder<TResult> _reportBuilder;
+	@Getter @Setter private String accountName;
 	private String accountNumberLastFour;
+	@Getter @Setter private String aquirerReferenceNumber;
 	private String altPaymentStatus;
 	private String authCode;
 	private String bankRoutingNumber;
 	private String batchId;
 	private String batchSequenceNumber;
+	@Getter @Setter private String brandReference;
 	private String buyerEmailAddress;
+	@Getter @Setter private String cardBrand;
 	private String cardHolderFirstName;
 	private String cardHolderLastName;
 	private String cardHolderPoNumber;
@@ -33,14 +40,19 @@ public class SearchCriteriaBuilder<TResult> {
 	private String clerkId;
 	private String clientTransactionId;
 	private String customerId;
+	@Getter @Setter private String depositReference;
 	private String displayName;
+	@Getter @Setter private Date endBatchDate;
 	private Date endDate;
+	@Getter @Setter private Date endDepositDate;
 	private String giftCurrency;
 	private String giftMaskedAlias;
 	private boolean fullyCaptured;
 	private String invoiceNumber;
 	private String issuerResult;
 	private String issuerTransactionId;
+	@Getter @Setter private String maskedCardNumber;
+	@Getter @Setter private String merchantId;
 	private boolean oneTime;
 	private String paymentMethodKey;
 	private ArrayList<PaymentMethodType> paymentTypes;
@@ -49,7 +61,10 @@ public class SearchCriteriaBuilder<TResult> {
 	private BigDecimal settlementAmount;
 	private String scheduleId;
 	private String siteTrace;
+	@Getter @Setter private Date startBatchDate;
 	private Date startDate;
+	@Getter @Setter private Date startDepositDate;
+	@Getter @Setter private TransactionStatus transactionStatus;
 	private String uniqueDeviceId;
 	private String username;
 
@@ -390,7 +405,7 @@ public class SearchCriteriaBuilder<TResult> {
 		Class<?> clazz = object.getClass();
 
 		// https://stackoverflow.com/questions/4052840/most-efficient-way-to-make-the-first-character-of-a-string-lower-case
-		char c[] = fieldName.toCharArray();
+		char[] c = fieldName.toCharArray();
 		c[0] = Character.toLowerCase(c[0]);
 		fieldName = new String(c);
 

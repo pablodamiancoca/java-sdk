@@ -5,9 +5,20 @@ import com.global.api.entities.enums.Environment;
 import com.global.api.entities.enums.Secure3dVersion;
 import com.global.api.entities.enums.ServiceEndpoints;
 import com.global.api.entities.exceptions.ConfigurationException;
-import com.global.api.gateways.*;
+import com.global.api.gateways.Gp3DSProvider;
+import com.global.api.gateways.PayPlanConnector;
+import com.global.api.gateways.PorticoConnector;
+import com.global.api.gateways.RealexConnector;
 import com.global.api.utils.StringUtils;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import lombok.experimental.Accessors;
+import lombok.experimental.SuperBuilder;
 
+@Accessors(chain = true)
+@Getter
+@Setter
 public class GatewayConfig extends Configuration {
     // portico & gp-ecom
     private boolean enableLogging;
@@ -36,6 +47,13 @@ public class GatewayConfig extends Configuration {
     private String merchantContactUrl;
     private String methodNotificationUrl;
     private Secure3dVersion secure3dVersion;
+
+    // GP-API
+    private String appId;           // For example: OWTP5ptQZKGj7EnvPt3uqO844XDBt8Oj
+    private String appKey;          // For example: abcDefgHijkLmn12
+
+/*    public GatewayConfig() {
+    }
 
     public int getSiteId() {
         return siteId;
@@ -91,12 +109,14 @@ public class GatewayConfig extends Configuration {
     public void setAccountId(String accountId) {
         this.accountId = accountId;
     }
+*/
 	public boolean isEnableLogging() {
 		return enableLogging;
 	}
 	public void setEnableLogging(boolean enableLogging) {
 		this.enableLogging = enableLogging;
 	}
+/*
 	public String getMerchantId() {
         return merchantId;
     }
@@ -159,6 +179,7 @@ public class GatewayConfig extends Configuration {
     public void setSecure3dVersion(Secure3dVersion secure3dVersion) {
         this.secure3dVersion = secure3dVersion;
     }
+ */
 
     public void configureContainer(ConfiguredServices services) {
         if(!StringUtils.isNullOrEmpty(merchantId)) {

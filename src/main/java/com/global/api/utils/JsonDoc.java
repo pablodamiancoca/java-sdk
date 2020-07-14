@@ -185,9 +185,7 @@ public class JsonDoc {
     }
     public boolean getBool(String name) {
         String value = getString(name);
-        if(value.equals("true"))
-            return true;
-        return false;
+        return value.equals("true");
     }
     public Integer getInt(String name) {
         String value = getString(name);
@@ -243,7 +241,7 @@ public class JsonDoc {
     }
     public static String parseSingleValue(String json, String name, IRequestEncoder encoder) {
         JsonDoc doc = parse(json);
-        return doc.getString("name");
+        return doc.getString(name);
     }
 
     private static JsonDoc parseObject(JsonObject obj, IRequestEncoder encoder) {
