@@ -17,6 +17,7 @@ import com.global.api.paymentMethods.EBTCardData;
 import com.global.api.paymentMethods.GiftCard;
 import com.global.api.paymentMethods.IPaymentMethod;
 import com.global.api.paymentMethods.TransactionReference;
+import com.global.api.utils.StringUtils;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -50,6 +51,7 @@ public class AuthorizationBuilder extends TransactionBuilder<Transaction> {
     private DecisionManager decisionManager;
     private String dynamicDescriptor;
     private EcommerceInfo ecommerceInfo;
+    @Getter @Setter private EmvFallbackCondition emvFallbackCondition;
     private EmvChipCondition emvChipCondition;
     private FraudFilterMode fraudFilterMode;
     private BigDecimal gratuity;
@@ -62,6 +64,7 @@ public class AuthorizationBuilder extends TransactionBuilder<Transaction> {
     private String offlineAuthCode;
     private boolean oneTimePayment;
     private String orderId;
+    @Getter @Setter private String paymentApplicationVersion;
     private String posSequenceNumber;
     private String productId;
     private ArrayList<String[]> miscProductData;
@@ -76,6 +79,12 @@ public class AuthorizationBuilder extends TransactionBuilder<Transaction> {
     private StoredCredential storedCredential;
     private HashMap<String, ArrayList<String[]>> supplementaryData;
     @Getter @Setter private BigDecimal surchargeAmount;
+    private boolean hasEmvFallbackData;
+
+    public boolean hasEmvFallbackData() {
+        return (emvFallbackCondition != null || emvChipCondition != null || !StringUtils.isNullOrEmpty(paymentApplicationVersion));
+    }
+
     private String tagData;
     private String timestamp;
 

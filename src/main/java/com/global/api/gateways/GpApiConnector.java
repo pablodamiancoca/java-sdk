@@ -5,10 +5,7 @@ import com.global.api.builders.ManagementBuilder;
 import com.global.api.builders.ReportBuilder;
 import com.global.api.builders.TransactionReportBuilder;
 import com.global.api.entities.*;
-import com.global.api.entities.enums.Channel;
-import com.global.api.entities.enums.CvnPresenceIndicator;
-import com.global.api.entities.enums.IStringConstant;
-import com.global.api.entities.enums.TransactionType;
+import com.global.api.entities.enums.*;
 import com.global.api.entities.exceptions.ApiException;
 import com.global.api.entities.exceptions.GatewayException;
 import com.global.api.entities.exceptions.UnsupportedTransactionException;
@@ -18,9 +15,7 @@ import com.global.api.paymentMethods.*;
 import com.global.api.serviceConfigs.GatewayConfig;
 import com.global.api.utils.*;
 import lombok.Getter;
-import lombok.NonNull;
 import lombok.Setter;
-import org.joda.time.DateTime;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
 import sun.reflect.generics.reflectiveObjects.NotImplementedException;
@@ -129,63 +124,133 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
         return response.getRawResponse();
     }
 
+    private String getEntryMode(AuthorizationBuilder builder) {
+        IPaymentMethod builderPaymentMethod = builder.getPaymentMethod();
+        if (builder.getPaymentMethod() instanceof ICardData) {
+            ICardData card = (ICardData) builder.getPaymentMethod();
+            if (card.isReaderPresent())
+                return card.isCardPresent() ? "MANUAL" : "IN_APP";
+            else
+                return card.isCardPresent() ? "MANUAL" : "ECOM";
+        } else if (builderPaymentMethod instanceof ITrackData) {
+            ITrackData track = (ITrackData) builder.getPaymentMethod();
+            if (builder.getTagData() != null) {
+                return (track.getEntryMethod() == EntryMethod.Swipe) ? "CHIP" : "CONTACTLESS_CHIP";
+            } else if (builder.hasEmvFallbackData()) {
+                return "CONTACTLESS_SWIPE";
+            }
+            return "SWIPE";
+        }
+        return "ECOM";
+    }
+
+    private String getCaptureMode(AuthorizationBuilder builder) {
+        if (builder.isMultiCapture())
+            return "MULTIPLE";
+        else if (builder.getTransactionType() == TransactionType.Auth)
+            return "LATER";
+
+        return "AUTO";
+    }
+
+    private String getCvvIndicator(ICardData cardData) {
+        switch (cardData.getCvnPresenceIndicator()) {
+            case Present:
+                return "PRESENT";
+            case Illegible:
+                return "ILLEGIBLE";
+            default:
+                return "NOT_PRESENT";
+        }
+    }
+
+    private String getCvvIndicator(EmvChipCondition emvChipCondition) {
+        if(emvChipCondition == null) return "";
+        switch (emvChipCondition) {
+            case ChipFailPreviousSuccess:
+                return "PREV_SUCCESS";
+            case ChipFailPreviousFail:
+                return "PREV_FAILED";
+            default:
+                return "UNKNOWN";
+        }
+    }
+
+
     public Transaction processAuthorization(AuthorizationBuilder builder) throws ApiException {
 
         addAccessTokenHeader();
 
         JsonDoc paymentMethod =
                 new JsonDoc()
-                        .set("entry_mode", "ECOM"); // [MOTO, ECOM, IN_APP, CHIP, SWIPE, MANUAL, CONTACTLESS_CHIP, CONTACTLESS_SWIPE]
+                        .set("entry_mode", getEntryMode(builder)); // [MOTO, ECOM, IN_APP, CHIP, SWIPE, MANUAL, CONTACTLESS_CHIP, CONTACTLESS_SWIPE]
 
         IPaymentMethod builderPaymentMethod = builder.getPaymentMethod();
         TransactionType builderTransactionType = builder.getTransactionType();
+        Address builderBillingAddress = builder.getBillingAddress();
 
+        // CardData
         if (builderPaymentMethod instanceof ICardData) {
-
-            ICardData cardData = (ICardData) builder.getPaymentMethod();
-
-            String cvvIndicator;
-            switch (cardData.getCvnPresenceIndicator()) {
-                case Present:
-                    cvvIndicator = "PRESENT";
-                    break;
-                case Illegible:
-                    cvvIndicator = "ILLEGIBLE";
-                    break;
-                default:
-                    cvvIndicator = "NOT_PRESENT";
-                    break;
-            }
+            ICardData cardData = (ICardData) builderPaymentMethod;
 
             JsonDoc card = new JsonDoc();
             card.set("number", cardData.getNumber());
             card.set("expiry_month", StringUtils.padLeft(cardData.getExpMonth().toString(), 2, '0'));
             card.set("expiry_year", cardData.getExpYear().toString().substring(2, 4));
+            //card.set("track", "");
+            card.set("tag", builder.getTagData());
             card.set("cvv", cardData.getCvn());
-            card.set("cvv_indicator", cvvIndicator);
-            card.set("avs_address", "Flat 123");
-            card.set("avs_postal_code", "50001");
+            card.set("avs_address", builderBillingAddress != null ? builderBillingAddress.getStreetAddress1() : "");
+            card.set("avs_postal_code", builderBillingAddress != null ? builderBillingAddress.getPostalCode() : "");
+            card.set("funding", builderPaymentMethod.getPaymentMethodType() == PaymentMethodType.Debit ? "DEBIT" : "CREDIT"); // [DEBIT, CREDIT]
             card.set("authcode", builder.getOfflineAuthCode());
-            // TODO: Add proper values
-            //.set("track", "")
-            //.set("tag", "")
-            //.set("chip_condition", "") // [PREV_SUCCESS, PREV_FAILED]
-            //.set("funding", "") // [DEBIT, CREDIT]
-            //.set("brand_reference", "")
+            //card.set("brand_reference", "")
 
-            // pin block
-            if (builderPaymentMethod instanceof IPinProtected && builderTransactionType != Reversal)
-                card.set("pin_block", ((IPinProtected) builderPaymentMethod).getPinBlock());
+            if (builder.getEmvChipCondition() != null) {
+                card.set("chip_condition", (builder.getEmvChipCondition() == EmvChipCondition.ChipFailPreviousSuccess) ? "PREV_SUCCESS" :  "PREV_FAILED"); // [PREV_SUCCESS, PREV_FAILED]
+            }
+            if ( (cardData.getCvnPresenceIndicator() == CvnPresenceIndicator.Present ) || ( cardData.getCvnPresenceIndicator() == CvnPresenceIndicator.Illegible ) || (cardData.getCvnPresenceIndicator() == CvnPresenceIndicator.NotOnCard) ) {
+                card.set("cvv_indicator", getCvvIndicator(cardData)); // [ILLEGIBLE, NOT_PRESENT, PRESENT]
+            }
 
             paymentMethod.set("card", card);
+        }
 
+        // TrackData
+        else if (builderPaymentMethod instanceof ITrackData) {
+            ITrackData track = (ITrackData) builderPaymentMethod;
+
+            JsonDoc card =
+                    new JsonDoc()
+                            .set("track", track.getValue())
+                            .set("tag", builder.getTagData())
+                            //.set("cvv", cardData.getCvn())
+                            //.set("cvv_indicator", "") // [ILLEGIBLE, NOT_PRESENT, PRESENT]
+                            .set("avs_address", builderBillingAddress != null ? builderBillingAddress.getStreetAddress1() : "")
+                            .set("avs_postal_code", builderBillingAddress != null ? builderBillingAddress.getPostalCode() : "")
+                            .set("authcode", builder.getOfflineAuthCode());
+                            //.set("brand_reference", "")
+
+            if (builderTransactionType == TransactionType.Sale) {
+                card.set("number", track.getPan());
+                card.set("expiry_month", track.getExpiry().substring(2, 4));
+                card.set("expiry_year", track.getExpiry().substring(0, 2));
+                card.set("chip_condition", getCvvIndicator(builder.getEmvChipCondition())); // [PREV_SUCCESS, PREV_FAILED]
+                card.set("funding", builderPaymentMethod.getPaymentMethodType() == PaymentMethodType.Debit ? "DEBIT" : "CREDIT"); // [DEBIT, CREDIT]
+            }
+
+            paymentMethod.set("card", card);
+        }
+
+        // Pin Block
+        if (builderPaymentMethod instanceof IPinProtected) {
+            paymentMethod.get("card").set("pin_block", ((IPinProtected) builderPaymentMethod).getPinBlock());
         }
 
         // Authentication
         if (builderPaymentMethod instanceof CreditCardData) {
             CreditCardData creditCardData = (CreditCardData) builderPaymentMethod;
-            paymentMethod.set("first_name", creditCardData.getCardHolderName());
-            //paymentMethod.Set("last_name", "");
+            paymentMethod.set("name", creditCardData.getCardHolderName());
 
             ThreeDSecure secureEcom = creditCardData.getThreeDSecure();
             if (secureEcom != null) {
@@ -193,7 +258,7 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
                         .set("xid", secureEcom.getXid())
                         .set("cavv", secureEcom.getCavv())
                         .set("eci", secureEcom.getEci());
-                //.Set("mac", ""); //A message authentication code submitted to confirm integrity of the request.
+                        //.set("mac", ""); //A message authentication code submitted to confirm integrity of the request.
 
                 paymentMethod.set("authentication", authentication);
             }
@@ -223,21 +288,14 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
             }
         }
 
-        String captureMode = "AUTO";
-        if (builder.isMultiCapture()) {
-            captureMode = "MULTIPLE";
-        } else if (builderTransactionType == TransactionType.Auth) {
-            captureMode = "LATER";
-        }
-
         JsonDoc data = new JsonDoc()
                 .set("account_name", "Transaction_Processing")
                 .set("type", builderTransactionType == Refund ? "REFUND" : "SALE") // [SALE, REFUND]
                 .set("channel", getGatewayConfig().getChannel()) // [CP, CNP]
-                .set("capture_mode", captureMode) // [AUTO, LATER, MULTIPLE]
+                .set("capture_mode", getCaptureMode(builder)) // [AUTO, LATER, MULTIPLE]
                 //.set("remaining_capture_count", "") // Pending Russell
                 .set("authorization_mode", builder.isAllowPartialAuth() ? "PARTIAL" : "WHOLE") // [PARTIAL, WHOLE]
-                .set("amount", builder.getAmount())
+                .set("amount", StringUtils.toNumeric(builder.getAmount()))
                 .set("currency", builder.getCurrency())
                 .set("reference", isNullOrEmpty(builder.getClientTransactionId()) ? java.util.UUID.randomUUID().toString() : builder.getClientTransactionId())
                 .set("description", builder.getDescription())
@@ -247,14 +305,35 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
                 .set("cashback_amount", builder.getCashBackAmount())
                 .set("surcharge_amount", builder.getSurchargeAmount())
                 .set("convenience_amount", builder.getConvenienceAmount())
-                .set("country", (builder.getBillingAddress() != null) ? builder.getBillingAddress().getCountry() : "US")
+                .set("country", (builderBillingAddress != null) ? builderBillingAddress.getCountry() : "US")
                 //.set("language", language)
                 .set("ip_address", builder.getCustomerIpAddress())
                 //.set("site_reference", "") //
                 .set("payment_method", paymentMethod);
 
         String rawResponse = doTransaction("POST", "/transactions", data.toString());
+
         return mapResponse(rawResponse);
+    }
+
+    public Transaction manageTransaction(ManagementBuilder builder) throws GatewayException {
+        String response = null;
+
+        JsonDoc data = new JsonDoc()
+                .set("amount", StringUtils.toNumeric(builder.getAmount()));
+
+        TransactionType builderTransactionType = builder.getTransactionType();
+        if (builderTransactionType == TransactionType.Capture) {
+            data.set("gratuity_amount", builder.getGratuity());
+            response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/capture", data.toString());
+        }
+        else if (builderTransactionType == TransactionType.Refund) {
+            response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/refund", data.toString());
+        }
+        else if (builderTransactionType == TransactionType.Reversal) {
+            response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/reversal", data.toString());
+        }
+        return mapResponse(response);
     }
 
     private TransactionSummary doGetTransactionDetail(final String transactionId) throws ApiException {
@@ -449,7 +528,7 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
                 .set("capture_mode", "AUTO") // [AUTO, LATER, MULTIPLE]
                 //.set("remaining_capture_count", "")
                 //.set("authorization_mode", "") // [PARTIAL, WHOLE]
-                .set("amount", builder.getAmount().toString())
+                .set("amount", StringUtils.toNumeric(builder.getAmount()))
                 .set("currency", builder.getCurrency())
                 .set("reference", "GENERATE ID HER")
                 //.set("description", "")
@@ -525,33 +604,34 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
             transaction.setTimestamp(jsonResponse.getString("time_created"));
             transaction.setResponseMessage(jsonResponse.getString("status"));
             transaction.setReferenceNumber(jsonResponse.getString("reference"));
+
             BatchSummary batchSummary = new BatchSummary();
             batchSummary.setSequenceNumber(jsonResponse.getString("batch_id"));
             transaction.setBatchSummary(batchSummary);
-            transaction.setResponseCode(jsonResponse.get("action").getString(("result_code")));
 
+            transaction.setResponseCode(jsonResponse.get("action").getString(("result_code")));
         }
 
         return transaction;
     }
 
-    public Transaction manageTransaction(ManagementBuilder builder) throws ApiException {
-        String response = "";
-        JsonDoc data =
-                new JsonDoc()
-                        .set("amount", builder.getAmount());
-
-        if (builder.getTransactionType() == Capture) {
-            data.set("gratuity_amount", builder.getGratuity());
-            response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/capture", data.toString());
-        } else if (builder.getTransactionType() == Refund) {
-            response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/refund", data.toString());
-        } else if (builder.getTransactionType() == Reversal) {
-            response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/reversal", data.toString());
-        }
-
-        return mapResponse(response);
-    }
+//    public Transaction manageTransaction(ManagementBuilder builder) throws ApiException {
+//        String response = null;
+//        JsonDoc data =
+//                new JsonDoc()
+//                        .set("amount", StringUtils.toNumeric(builder.getAmount()));
+//
+//        if (builder.getTransactionType() == Capture) {
+//            data.set("gratuity_amount", builder.getGratuity());
+//            response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/capture", data.toString());
+//        } else if (builder.getTransactionType() == Refund) {
+//            response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/refund", data.toString());
+//        } else if (builder.getTransactionType() == Reversal) {
+//            response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/reversal", data.toString());
+//        }
+//
+//        return mapResponse(response);
+//    }
 
     @SuppressWarnings("unchecked")
     public <T> T processReport(ReportBuilder<T> builder, Class<T> clazz) throws ApiException {

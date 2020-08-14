@@ -1,10 +1,10 @@
 package com.global.api.entities.enums;
 
 public enum CvnPresenceIndicator {
-    Present("1"),
-    Illegible("2"),
-    NotOnCard("3"),
-    NotRequested("4");
+    Present("1"),           // Indicates CVN was present.
+    Illegible("2"),         // Indicates CVN was present but illegible.
+    NotOnCard("3"),         // Indicates CVN was not present.
+    NotRequested("4");      // Indicates CVN was not requested.
 
     private String value;
     CvnPresenceIndicator(String value){

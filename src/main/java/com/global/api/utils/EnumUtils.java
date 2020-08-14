@@ -23,4 +23,26 @@ public class EnumUtils {
         ReverseIntEnumMap<V> map = new ReverseIntEnumMap<V>(valueType);
         return map.get(value);
     }
+
+    public enum Target {
+        NWS,
+        VAPS,
+        Transit,
+        Portico,
+        GP_API,
+    }
+
+    // TODO: Implement
+//    public static String getMapping(Target target, Object value) throws NoSuchFieldException {
+//        if (value instanceof Enum) {
+//            var mappings = ((Enum<?>) value).getDeclaringClass().getField(value.toString()).get GetCustomAttributes<MapAttribute>();
+//            foreach (var mapping in mappings) {
+//                if (mapping.Target.Equals(target)) {
+//                    return mapping.Value;
+//                }
+//            }
+//            return null;
+//        }
+//        return null;
+//    }
 }
