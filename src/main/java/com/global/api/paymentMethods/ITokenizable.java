@@ -5,4 +5,6 @@ public interface ITokenizable {
     void setToken(String token);
 
     String tokenize();
+    boolean updateTokenExpiry();
+    boolean deleteToken();
 }

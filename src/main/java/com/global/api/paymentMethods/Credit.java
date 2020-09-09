@@ -1,6 +1,7 @@
 package com.global.api.paymentMethods;
 
 import com.global.api.builders.AuthorizationBuilder;
+import com.global.api.builders.ManagementBuilder;
 import com.global.api.entities.EncryptionData;
 import com.global.api.entities.ThreeDSecure;
 import com.global.api.entities.Transaction;
@@ -9,7 +10,8 @@ import com.global.api.entities.enums.MobilePaymentMethodType;
 import com.global.api.entities.enums.PaymentMethodType;
 import com.global.api.entities.enums.TransactionType;
 import com.global.api.entities.exceptions.ApiException;
-import com.global.api.utils.CardUtils;
+import com.global.api.entities.exceptions.BuilderException;
+import com.global.api.utils.StringUtils;
 
 import java.math.BigDecimal;
 
@@ -107,10 +109,72 @@ public abstract class Credit implements IPaymentMethod, IEncryptable, ITokenizab
     }
 
     public String tokenize() {
-        try {
-            Transaction response = new AuthorizationBuilder(TransactionType.Verify, this).withRequestMultiUseToken(true).execute();
-            return response.getToken();
-        }
-        catch(ApiException e) { return null; }
+        return tokenize(true, "default");
     }
+
+    public String tokenize(String configName) {
+        return tokenize(true, configName);
+    }
+
+    public String tokenize(boolean verifyCard, String configName) {
+        TransactionType type = verifyCard ? TransactionType.Verify : TransactionType.Tokenize;
+        try {
+            Transaction response =
+                    new AuthorizationBuilder(type, this)
+                            .withRequestMultiUseToken(verifyCard)
+                            .execute(configName);
+            return response.getToken();
+        } catch (ApiException e) {
+            return null;
+        }
+    }
+
+    public boolean updateTokenExpiry() {
+        try {
+            return updateTokenExpiry("default");
+        } catch (BuilderException e) {
+            return false;
+        }
+    }
+
+    public boolean updateTokenExpiry(String configName) throws BuilderException {
+        if (StringUtils.isNullOrEmpty(token)) {
+            throw new BuilderException("Token cannot be null");
+        }
+
+        try {
+            new ManagementBuilder(TransactionType.TokenUpdate)
+                    .withPaymentMethod(this)
+                    .execute(configName);
+            return true;
+        }
+        catch (ApiException e) {
+            return false;
+        }
+    }
+
+    public boolean deleteToken() {
+        try {
+            return deleteToken("default");
+        } catch (BuilderException e) {
+            return false;
+        }
+    }
+
+    public boolean deleteToken(String configName) throws BuilderException {
+        if (StringUtils.isNullOrEmpty(token)) {
+            throw new BuilderException("Token cannot be null");
+        }
+
+        try {
+            new ManagementBuilder(TransactionType.TokenDelete)
+                    .withPaymentMethod(this)
+                    .execute(configName);
+            return true;
+        }
+        catch (ApiException e) {
+            return false;
+        }
+    }
+
 }

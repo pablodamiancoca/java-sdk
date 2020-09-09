@@ -5,13 +5,16 @@ import com.global.api.utils.IOUtils;
 import com.global.api.utils.StringUtils;
 
 import org.apache.http.entity.mime.MultipartEntity;
+import sun.net.www.protocol.https.HttpsURLConnectionImpl;
 
 import javax.net.ssl.HttpsURLConnection;
 import java.io.*;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.zip.GZIPInputStream;
 
 abstract class Gateway {
@@ -68,7 +71,17 @@ abstract class Gateway {
             conn.setSSLSocketFactory(new SSLSocketFactoryEx());
             conn.setConnectTimeout(timeout);
             conn.setDoInput(true);
-            conn.setRequestMethod(verb);
+            // ----------------------------------------------------------------------
+            // Fix: Supports PATCH requests on HttpsURLConnection
+            // https://stackoverflow.com/questions/25163131/httpurlconnection-invalid-http-method-patch
+            // ----------------------------------------------------------------------
+            if ("PATCH".equalsIgnoreCase(verb)) {
+                supportVerbs("PATCH");
+                setRequestMethod(conn, verb);
+            } else {
+                conn.setRequestMethod(verb);
+            }
+            // ----------------------------------------------------------------------
             conn.addRequestProperty("Content-Type", String.format("%s; charset=UTF-8", contentType));
 
             for (Map.Entry<String, String> header: headers.entrySet()) {
@@ -177,4 +190,45 @@ abstract class Gateway {
         }
         return sb.toString();
     }
+
+    private static void supportVerbs(String... newVerbs) {
+        try {
+            Field methodsField = HttpURLConnection.class.getDeclaredField("methods");
+
+            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            modifiersField.setAccessible(true);
+            modifiersField.setInt(methodsField, methodsField.getModifiers() & ~Modifier.FINAL);
+
+            methodsField.setAccessible(true);
+
+            String[] oldMethods = (String[]) methodsField.get(null);
+            Set<String> methodsSet = new LinkedHashSet<>(Arrays.asList(oldMethods));
+            methodsSet.addAll(Arrays.asList(newVerbs));
+            String[] newMethods = methodsSet.toArray(new String[0]);
+
+            methodsField.set(null/*static field*/, newMethods);
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new IllegalStateException(e);
+        }
+
+    }
+
+    private void setRequestMethod(final HttpURLConnection c, final String value) {
+        try {
+            final Object target;
+            if (c instanceof HttpsURLConnectionImpl) {
+                final Field delegate = HttpsURLConnectionImpl.class.getDeclaredField("delegate");
+                delegate.setAccessible(true);
+                target = delegate.get(c);
+            } else {
+                target = c;
+            }
+            final Field f = HttpURLConnection.class.getDeclaredField("method");
+            f.setAccessible(true);
+            f.set(target, value);
+        } catch (IllegalAccessException | NoSuchFieldException ex) {
+            throw new AssertionError(ex);
+        }
+    }
+
 }

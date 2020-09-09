@@ -14,8 +14,6 @@ import com.global.api.network.NetworkMessageHeader;
 import com.global.api.paymentMethods.*;
 import com.global.api.serviceConfigs.GatewayConfig;
 import com.global.api.utils.*;
-import lombok.Getter;
-import lombok.Setter;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
 import sun.reflect.generics.reflectiveObjects.NotImplementedException;
@@ -32,54 +30,49 @@ import static com.global.api.entities.enums.TransactionType.*;
 import static com.global.api.utils.StringUtils.isNullOrEmpty;
 
 public class GpApiConnector extends RestGateway implements IPaymentGateway, IReportingService {
-    @Getter
-    @Setter
     private GatewayConfig gatewayConfig;
-    @Getter
-    @Setter
-    private static String accessToken;
+    private String accessToken;
+    private String dataAccountName;
+    private String disputeManagementAccountName;
+    private String tokenizationAccountName;
+    private String transactionProcessingAccountName;
 
     private static final String GP_API_VERSION = "2020-04-10";
     private static final String NONCE = "transactionsapi";
 
     private static final DateTimeFormatter TIMESTAMP_DTF = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
-    private static final SimpleDateFormat TIMESTAMP_SDF = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
     private static final SimpleDateFormat DATE_SDF = new SimpleDateFormat("yyyy-MM-dd");
-    private static final DateTimeFormatter DATE_DTF = DateTimeFormat.forPattern("yyyy-MM-dd");
 
     public GpApiConnector(GatewayConfig gatewayConfig) {
         super();    // ContentType is: "application/json"
-        setGatewayConfig(gatewayConfig);
-        setServiceUrl(getGatewayConfig().getServiceUrl());
-        addBasicHeaders();
-    }
 
-    private void addBasicHeaders() {
+        this.gatewayConfig = gatewayConfig;
+        setServiceUrl(this.gatewayConfig.getServiceUrl());
+
         headers.put(org.apache.http.HttpHeaders.ACCEPT, "application/json");
         headers.put(org.apache.http.HttpHeaders.ACCEPT_ENCODING, "gzip");
         headers.put("X-GP-Version", GP_API_VERSION);
     }
 
-    public void addAccessTokenHeader() throws ApiException {
-        if (isNullOrEmpty(accessToken)) {
-            setAccessToken(requestAccessToken());
-        }
-        headers.put("Authorization", String.format("Bearer %s", accessToken));
-    }
-
-    private String requestAccessToken() throws ApiException {
+    private void sendAccessTokenRequest() throws GatewayException {
         String requestBodyStr =
                 new JsonDoc()
-                        .set("app_id", getGatewayConfig().getAppId())
+                        .set("app_id", gatewayConfig.getAppId())
                         .set("nonce", NONCE)
-                        .set("secret", getSHA512SecurePassword(getGatewayConfig().getAppKey(), NONCE))
+                        .set("secret", getSHA512SecurePassword(gatewayConfig.getAppKey(), NONCE))
                         .set("grant_type", "client_credentials")
                         .set("seconds_to_expire", "60000")
                         .set("interval_to_expire", "WEEK")
                         .toString();
 
-        String rawResponse = doTransaction("POST", "/accesstoken", requestBodyStr, null);
-        return JsonDoc.parseSingleValue(rawResponse, "token");
+        String rawResponse = super.doTransaction("POST", "/accesstoken", requestBodyStr, null);
+        JsonDoc jsonResponse = JsonDoc.parse(rawResponse);
+
+        accessToken = jsonResponse.getString("token");
+        dataAccountName = jsonResponse.getString("dataAccountName");
+        disputeManagementAccountName = jsonResponse.getString("disputeManagementAccountName");
+        tokenizationAccountName = jsonResponse.getString("tokenizationAccountName");
+        transactionProcessingAccountName = jsonResponse.getString("transactionProcessingAccountName");
     }
 
     public String getSHA512SecurePassword(String passwordToHash, String salt) throws GatewayException {
@@ -100,6 +93,15 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
     }
 
     @Override
+    public String doTransaction(String verb, String endpoint, String data, HashMap<String, String> queryStringParams) throws GatewayException {
+        if (isNullOrEmpty(accessToken))
+            sendAccessTokenRequest();
+        headers.put("Authorization", String.format("Bearer %s", accessToken));
+
+        return super.doTransaction(verb, endpoint, data, queryStringParams);
+    }
+
+    @Override
     protected String handleResponse(GatewayResponse response) throws GatewayException {
         if (response.getStatusCode() != 200) {
 
@@ -111,6 +113,7 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
                 String detailedErrorCode = parsed.getString("detailed_error_code");
                 String detailedErrorDescription = parsed.getString("detailed_error_description");
 
+                // TODO: Implement Retry functionality when Access Token expires
                 throw new GatewayException(
                         String.format("Status Code: %s - Error code: %s", response.getStatusCode(), errorCode),
                         detailedErrorCode,
@@ -178,9 +181,6 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
 
 
     public Transaction processAuthorization(AuthorizationBuilder builder) throws ApiException {
-
-        addAccessTokenHeader();
-
         JsonDoc paymentMethod =
                 new JsonDoc()
                         .set("entry_mode", getEntryMode(builder)); // [MOTO, ECOM, IN_APP, CHIP, SWIPE, MANUAL, CONTACTLESS_CHIP, CONTACTLESS_SWIPE]
@@ -195,8 +195,8 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
 
             JsonDoc card = new JsonDoc();
             card.set("number", cardData.getNumber());
-            card.set("expiry_month", StringUtils.padLeft(cardData.getExpMonth().toString(), 2, '0'));
-            card.set("expiry_year", cardData.getExpYear().toString().substring(2, 4));
+            card.set("expiry_month", cardData.getExpMonth() != null ? StringUtils.padLeft(cardData.getExpMonth().toString(), 2, '0') : null);
+            card.set("expiry_year", cardData.getExpYear() != null ? cardData.getExpYear().toString().substring(2, 4) : null);
             //card.set("track", "");
             card.set("tag", builder.getTagData());
             card.set("cvv", cardData.getCvn());
@@ -205,6 +205,24 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
             card.set("funding", builderPaymentMethod.getPaymentMethodType() == PaymentMethodType.Debit ? "DEBIT" : "CREDIT"); // [DEBIT, CREDIT]
             card.set("authcode", builder.getOfflineAuthCode());
             //card.set("brand_reference", "")
+
+            if (builderTransactionType == TransactionType.Verify) {
+                if (builder.isRequestMultiUseToken()) {
+                    JsonDoc tokenizationData =
+                            new JsonDoc()
+                                    .set("account_name", tokenizationAccountName)
+                                    .set("reference", isNullOrEmpty(builder.getClientTransactionId()) ? java.util.UUID.randomUUID().toString() : builder.getClientTransactionId())
+                                    .set("name", "")
+                                    .set("card", card);
+
+                    String tokenizationResponse = doTransaction("POST", "/payment-methods", tokenizationData.toString());
+                    return mapResponse(tokenizationResponse);
+                }
+                else {
+                    String tokenizationResponse = doTransaction("GET", "/payment-methods/" + ((ITokenizable) builder.getPaymentMethod()).getToken());
+                    return mapResponse(tokenizationResponse);
+                }
+            }
 
             if (builder.getEmvChipCondition() != null) {
                 card.set("chip_condition", (builder.getEmvChipCondition() == EmvChipCondition.ChipFailPreviousSuccess) ? "PREV_SUCCESS" :  "PREV_FAILED"); // [PREV_SUCCESS, PREV_FAILED]
@@ -240,6 +258,14 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
             }
 
             paymentMethod.set("card", card);
+        }
+
+        // Tokenized Payment Method
+        if (builderPaymentMethod instanceof ITokenizable) {
+            String token = ((ITokenizable) builderPaymentMethod).getToken();
+            if (!StringUtils.isNullOrEmpty(token)) {
+                paymentMethod.set("id", token);
+            }
         }
 
         // Pin Block
@@ -291,7 +317,7 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
         JsonDoc data = new JsonDoc()
                 .set("account_name", "Transaction_Processing")
                 .set("type", builderTransactionType == Refund ? "REFUND" : "SALE") // [SALE, REFUND]
-                .set("channel", getGatewayConfig().getChannel()) // [CP, CNP]
+                .set("channel", gatewayConfig.getChannel()) // [CP, CNP]
                 .set("capture_mode", getCaptureMode(builder)) // [AUTO, LATER, MULTIPLE]
                 //.set("remaining_capture_count", "") // Pending Russell
                 .set("authorization_mode", builder.isAllowPartialAuth() ? "PARTIAL" : "WHOLE") // [PARTIAL, WHOLE]
@@ -301,10 +327,10 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
                 .set("description", builder.getDescription())
                 .set("order_reference", builder.getOrderId())
                 //.set("initiator", "") // [PAYER, MERCHANT] //default to PAYER
-                .set("gratuity_amount", builder.getGratuity())
-                .set("cashback_amount", builder.getCashBackAmount())
-                .set("surcharge_amount", builder.getSurchargeAmount())
-                .set("convenience_amount", builder.getConvenienceAmount())
+                .set("gratuity_amount", StringUtils.toNumeric(builder.getGratuity()))
+                .set("cashback_amount", StringUtils.toNumeric(builder.getCashBackAmount()))
+                .set("surcharge_amount", StringUtils.toNumeric(builder.getSurchargeAmount()))
+                .set("convenience_amount", StringUtils.toNumeric(builder.getConvenienceAmount()))
                 .set("country", (builderBillingAddress != null) ? builderBillingAddress.getCountry() : "US")
                 //.set("language", language)
                 .set("ip_address", builder.getCustomerIpAddress())
@@ -319,20 +345,45 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
     public Transaction manageTransaction(ManagementBuilder builder) throws GatewayException {
         String response = null;
 
-        JsonDoc data = new JsonDoc()
-                .set("amount", StringUtils.toNumeric(builder.getAmount()));
+        JsonDoc data = new JsonDoc();
 
         TransactionType builderTransactionType = builder.getTransactionType();
+        IPaymentMethod builderPaymentMethod = builder.getPaymentMethod();
+
         if (builderTransactionType == TransactionType.Capture) {
-            data.set("gratuity_amount", builder.getGratuity());
+            data.set("amount", StringUtils.toNumeric(builder.getAmount()));
+            data.set("gratuity_amount", StringUtils.toNumeric(builder.getGratuity()));
             response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/capture", data.toString());
         }
         else if (builderTransactionType == TransactionType.Refund) {
+            data.set("amount", StringUtils.toNumeric(builder.getAmount()));
             response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/refund", data.toString());
         }
         else if (builderTransactionType == TransactionType.Reversal) {
+            data.set("amount", StringUtils.toNumeric(builder.getAmount()));
             response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/reversal", data.toString());
         }
+        else if (builderTransactionType == TransactionType.TokenUpdate && builderPaymentMethod instanceof CreditCardData) {
+            CreditCardData cardData = (CreditCardData) builderPaymentMethod;
+
+            JsonDoc card =
+                    new JsonDoc()
+                        .set("expiry_month", cardData.getExpMonth() != null ? StringUtils.padLeft(cardData.getExpMonth().toString(), 2, '0') : "")
+                        .set("expiry_year", cardData.getExpYear() != null ? StringUtils.padLeft(cardData.getExpYear().toString(),4, '0').substring(2, 4) : "");
+
+            JsonDoc payload =
+                    new JsonDoc()
+                        .set("card", card);
+
+            response = doTransaction("PATCH", "/payment-methods/" + ((ITokenizable) builderPaymentMethod).getToken() + "/edit", payload.toString());
+        }
+        else if (builderTransactionType == TransactionType.TokenDelete && builderPaymentMethod instanceof ITokenizable) {
+            response = doTransaction("POST", "/payment-methods/" + ((ITokenizable) builderPaymentMethod).getToken() + "/delete", "");
+        }
+        else if (builderTransactionType == TransactionType.Detokenize && builderPaymentMethod instanceof ITokenizable) {
+            response = doTransaction("POST", "/payment-methods/" + ((ITokenizable) builderPaymentMethod).getToken() + "/detokenize", "");
+        }
+
         return mapResponse(response);
     }
 
@@ -560,7 +611,6 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
     }
 
     private TransactionSummary hydrateTransactionSummary(JsonDoc doc) {
-
         TransactionSummary summary = new TransactionSummary();
 
         //TODO: Map all transaction properties
@@ -610,34 +660,21 @@ public class GpApiConnector extends RestGateway implements IPaymentGateway, IRep
             transaction.setBatchSummary(batchSummary);
 
             transaction.setResponseCode(jsonResponse.get("action").getString(("result_code")));
+            // Tokenization Card Responses returns the related token card into "id" field
+            transaction.setToken(jsonResponse.getString("id"));
+            if( jsonResponse.get("card") != null) {
+                transaction.setCardNumber(jsonResponse.get("card").getString("number"));
+                transaction.setCardType(jsonResponse.get("card").getString("brand"));
+                transaction.setCardExpMonth(jsonResponse.get("card").getInt("expiry_month"));
+                transaction.setCardExpYear(jsonResponse.get("card").getInt("expiry_year"));
+            }
         }
 
         return transaction;
     }
 
-//    public Transaction manageTransaction(ManagementBuilder builder) throws ApiException {
-//        String response = null;
-//        JsonDoc data =
-//                new JsonDoc()
-//                        .set("amount", StringUtils.toNumeric(builder.getAmount()));
-//
-//        if (builder.getTransactionType() == Capture) {
-//            data.set("gratuity_amount", builder.getGratuity());
-//            response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/capture", data.toString());
-//        } else if (builder.getTransactionType() == Refund) {
-//            response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/refund", data.toString());
-//        } else if (builder.getTransactionType() == Reversal) {
-//            response = doTransaction("POST", "/transactions/" + builder.getTransactionId() + "/reversal", data.toString());
-//        }
-//
-//        return mapResponse(response);
-//    }
-
     @SuppressWarnings("unchecked")
     public <T> T processReport(ReportBuilder<T> builder, Class<T> clazz) throws ApiException {
-
-        addAccessTokenHeader();
-
         if (builder instanceof TransactionReportBuilder) {
 
             TransactionReportBuilder<TransactionSummary> trb = (TransactionReportBuilder<TransactionSummary>) builder;

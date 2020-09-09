@@ -30,13 +30,19 @@ public enum TransactionType implements IFlag {
     Release,
     VerifyEnrolled,
     VerifySignature,
+    TokenUpdate,
+    TokenDelete,
+    VerifyAuthentication,
+    InitiateAuthentication,
+    DataCollect,
+    PreAuthCompletion,
     DccRateLookup,
     Increment,
+    Tokenize,
     CashOut,
-    DataCollect,
-    VerifyAuthentication,
-    PreAuthCompletion,
-    InitiateAuthentication,
+    Payment,
+    CashAdvance,
+    Detokenize,
     SendFile;
 
     public long getLongValue() {
